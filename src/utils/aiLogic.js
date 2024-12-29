@@ -1,83 +1,73 @@
 import { findChoices, isBoardFull, checkWinner } from "../utils/gameLogic";
 
-// Memoization map to store evaluated board states
-const memo = new Map();
-
 const evaluateBoard = (board, playerPieces, currentPlayer) => {
     let score = 0;
 
-    // Add a score for each piece on the board
+    // Add score for occupied board positions by current player
     for (let i = 0; i < board.length; i++) {
         if (board[i] && board[i].player === currentPlayer) {
-            // Assign score based on the piece size and position
             if (board[i].piece === "L") {
-                score += 3;  // Larger pieces could have higher value if placed strategically
+                score += 3;
             } else {
                 score += 1;
             }
         }
     }
 
-    // Add points for available pieces (pieces that haven't been used yet)
     const availablePieces = playerPieces[currentPlayer];
     Object.entries(availablePieces).forEach(([size, count]) => {
         if (count > 0) {
-            // Small bonus for available pieces, larger pieces get more weight
             const pieceRank = { L: 3, M: 2, S: 1 };
-            score += pieceRank[size] * count;  // More available larger pieces are better
+            score += pieceRank[size] * count;
         }
     });
 
-    // Check for center control (more influence if AI holds center)
+    // Center control (higher score for occupying the center)
     if (board[4] && board[4].player === currentPlayer) {
-        score += 4;  // High score for occupying the center
+        score += 4; // Big reward for controlling the center
     }
 
-    // Check for blocking user wins and the potential of AI winning
+    // Block opponent from winning and prioritize AI's potential wins
     const opponent = currentPlayer === "ai" ? "user" : "ai";
-
-    // Penalty for allowing the opponent to win
     if (checkWinner(opponent, board)) {
-        score -= 100;  // High penalty if the opponent is winning
+        score -= 100; // Penalize if opponent is winning
     }
 
-    // Check if AI can win immediately
     if (checkWinner(currentPlayer, board)) {
-        score += 100;  // High score if AI is winning
+        score += 100; // Reward if AI wins
     }
 
-    // Evaluate threats and potential winning moves
+    // Consider chains of moves (two-move wins, forks)
     for (let i = 0; i < board.length; i++) {
         if (board[i] && board[i].player === currentPlayer) {
-            // If this move creates a winning position, add more weight
+            // Check if placing this piece contributes to a winning position
             if (checkWinner(currentPlayer, board)) {
-                score += 10;
+                score += 10; // Major score boost for winning
             }
         }
     }
 
-    // Evaluate opportunity to take over opponent's piece
+    // Evaluate opponent's possible moves and threat levels (to block or counteract)
     for (let i = 0; i < board.length; i++) {
         if (board[i] && board[i].player === opponent) {
-            // Check if AI has a larger piece that can take over this opponent's piece
             const opponentPiece = board[i].piece;
             if (
-                (opponentPiece === "S" && playerPieces[currentPlayer]["M"] > 0) ||  // M takes S
-                (opponentPiece === "M" && playerPieces[currentPlayer]["L"] > 0)     // L takes M
+                (opponentPiece === "S" && playerPieces[currentPlayer]["M"] > 0) ||
+                (opponentPiece === "M" && playerPieces[currentPlayer]["L"] > 0)
             ) {
-                // Simulate taking over the opponent's piece
+                // Simulate taking the opponent's piece if possible
                 const prevSquare = board[i];
-                board[i] = { player: currentPlayer, piece: prevSquare.piece }; // "Take over"
-                playerPieces[currentPlayer][prevSquare.piece]--; // Decrease piece count
+                board[i] = { player: currentPlayer, piece: prevSquare.piece };
+                playerPieces[currentPlayer][prevSquare.piece]--;
 
-                // Check if taking this piece creates a winning position
+                // Check if taking over the opponent's piece could lead to a win
                 if (checkWinner(currentPlayer, board)) {
-                    score += 50;  // Reward high score for winning
+                    score += 50; // Strong bonus for winning by taking over
                 } else {
-                    score += 5;  // Small reward for taking over a piece but not winning
+                    score += 5; // Smaller reward for taking over a piece
                 }
 
-                // Undo the move (take back the opponent's piece)
+                // Undo the simulated move
                 board[i] = prevSquare;
                 playerPieces[currentPlayer][prevSquare.piece]++;
             }
@@ -87,20 +77,12 @@ const evaluateBoard = (board, playerPieces, currentPlayer) => {
     return score;
 };
 
+// Minimax with deeper lookahead and alpha-beta pruning
 export const minimax = (board, depth, isMaximizing, alpha, beta, playerPieces, isFirstMove) => {
-    // Base conditions: Check for winner or draw
-    if (checkWinner("ai", board)) return 1;  // AI wins
+    if (checkWinner("ai", board)) return 1; // AI wins
     if (checkWinner("user", board)) return -1; // User wins
     if (isBoardFull(board)) return 0; // Draw
-    if (depth >= 5) return evaluateBoard(board, playerPieces, isMaximizing ? "ai" : "user");  // Depth limit
-
-    // Generate a key for the current board state
-    const boardKey = board.map(sq => sq ? sq.piece : null).join(',');
-
-    // Check if the result for this board state is already computed
-    if (memo.has(boardKey)) {
-        return memo.get(boardKey);
-    }
+    if (depth >= 6) return evaluateBoard(board, playerPieces, isMaximizing ? "ai" : "user"); // Increased depth
 
     // Determine current player based on the maximizing/minimizing flag
     const currentPlayer = isMaximizing ? "ai" : "user";
@@ -108,49 +90,40 @@ export const minimax = (board, depth, isMaximizing, alpha, beta, playerPieces, i
 
     let bestScore = isMaximizing ? -Infinity : Infinity;
 
-    // Iterate over possible moves and recursively evaluate them
+    // Try all possible moves
     for (let move of possibleMoves) {
         const [index, size] = move;
 
-        // Prevent placing "L" in the center during the first move
+        // Prevent placing "L" in the center during first move
         if (isFirstMove && currentPlayer === "ai" && size === "L" && index === 4) continue;
 
-        // Prevent overriding own pieces
-        if (board[index] && board[index].player === currentPlayer) continue; // Skip if the square is occupied by the same player's piece
+        // Skip move if the square is already occupied by the same player's piece
+        if (board[index] && board[index].player === currentPlayer) continue;
 
         // Simulate the move
         const prevSquare = board[index];
-        board[index] = { player: currentPlayer, piece: size }; // Make the move
-        playerPieces[currentPlayer][size]--; // Decrease piece count for the current player
+        board[index] = { player: currentPlayer, piece: size };
+        playerPieces[currentPlayer][size]--;
 
-        // Evaluate the board position
-        const score = evaluateBoard(board, playerPieces, currentPlayer);
-
-        // Recursively evaluate the resulting board
-        const recursiveScore = minimax(board, depth + 1, !isMaximizing, alpha, beta, playerPieces, false);
-
-        // Combine the scores (in this case, using the recursive score)
-        const finalScore = score + recursiveScore;
+        // Recursively evaluate the move
+        const score = minimax(board, depth + 1, !isMaximizing, alpha, beta, playerPieces, false);
 
         // Undo the move
         board[index] = prevSquare;
         playerPieces[currentPlayer][size]++;
 
-        // Perform alpha-beta pruning
+        // Alpha-Beta pruning
         if (isMaximizing) {
-            bestScore = Math.max(bestScore, finalScore);
-            alpha = Math.max(alpha, finalScore);
+            bestScore = Math.max(bestScore, score);
+            alpha = Math.max(alpha, score);
         } else {
-            bestScore = Math.min(bestScore, finalScore);
-            beta = Math.min(beta, finalScore);
+            bestScore = Math.min(bestScore, score);
+            beta = Math.min(beta, score);
         }
 
         // Prune the search tree if alpha-beta condition is met
         if (beta <= alpha) break;
     }
-
-    // Memoize the result for this board state
-    memo.set(boardKey, bestScore);
 
     return bestScore;
 };
@@ -165,20 +138,18 @@ export const findBestMove = (board, playerPieces, isFirstMove) => {
     for (let move of possibleMoves) {
         const [index, size] = move;
 
-        // Prevent placing "L" in the center during the first move
-        if (isFirstMove && size === "L" && index === 4) {
-            continue; // Skip if it's the first move and "L" is being placed in the center
-        }
+        // Prevent placing "L" in the center during first move
+        if (isFirstMove && size === "L" && index === 4) continue;
 
         // Prevent overriding own pieces
-        if (board[index] && board[index].player === "ai") continue; // Skip if the square is occupied by AI's piece
+        if (board[index] && board[index].player === "ai") continue;
 
         // Simulate the move
         const prevSquare = board[index];
-        board[index] = { player: "ai", piece: size }; // Make the move
-        playerPieces.ai[size]--; // Decrease AI piece count
+        board[index] = { player: "ai", piece: size };
+        playerPieces.ai[size]--;
 
-        // Get the score for this move by evaluating the board
+        // Evaluate the board using the minimax strategy
         const score = minimax(board, 0, false, -Infinity, Infinity, playerPieces, false);
 
         // Undo the move
